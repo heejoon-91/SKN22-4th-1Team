@@ -780,7 +780,7 @@
           }
 
           try {
-            const url = `/api/symptom-products/?ingredients=${encodeURIComponent(batchIngredients.join(","))}&symptom=${encodeURIComponent(symptomTerm)}`;
+            const url = `/api/symptom-products/?ingredients=${encodeURIComponent(batchIngredients.join(","))}&symptom=${encodeURIComponent(symptomTerm)}&include_warning=0`;
             const res = await fetch(url, { headers: { "X-Requested-With": "XMLHttpRequest" } });
             const payload = await res.json();
             if (!res.ok || payload.status !== "success") {

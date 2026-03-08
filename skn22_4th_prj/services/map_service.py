@@ -751,10 +751,14 @@ class MapService:
             "deduped_items": 0,
             "final_products": 0,
         }
+        search_window = min(max(max(limit, 1) * 3, 12), 24)
+        diagnostics["search_window"] = search_window
 
         async with httpx.AsyncClient(timeout=10.0) as client:
             try:
-                primary_url = f"{cls._FDA_LABEL_URL}?search={primary_query}&limit=50"
+                primary_url = (
+                    f"{cls._FDA_LABEL_URL}?search={primary_query}&limit={search_window}"
+                )
                 response = await client.get(primary_url)
                 if response.status_code != 200:
                     data = []
@@ -765,7 +769,9 @@ class MapService:
                 # Fallback for ingredients whose OTC labels are indexed under active_ingredient text.
                 if not data:
                     diagnostics["fallback_used"] = True
-                    fallback_url = f"{cls._FDA_LABEL_URL}?search={fallback_query}&limit=50"
+                    fallback_url = (
+                        f"{cls._FDA_LABEL_URL}?search={fallback_query}&limit={search_window}"
+                    )
                     fallback_res = await client.get(fallback_url)
                     if fallback_res.status_code == 200:
                         data = fallback_res.json().get("results", [])

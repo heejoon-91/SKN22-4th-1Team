@@ -443,6 +443,13 @@ async def pharmacy_api(request):
 async def symptom_products_api(request):
     raw = request.GET.get("ingredients", "").strip()
     symptom = (request.GET.get("symptom") or "").strip()
+    include_warning = str(request.GET.get("include_warning") or "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "y",
+        "on",
+    }
     debug_mode = str(request.GET.get("debug") or "").strip().lower() in {"1", "true", "yes", "y", "on"}
     ingredients = []
     seen_ingredients = set()
@@ -461,7 +468,10 @@ async def symptom_products_api(request):
 
     semaphore = asyncio.Semaphore(3)
     target_visible_products = 3
-    candidate_fetch_limit = 10
+    candidate_fetch_limit = max(
+        3,
+        min(int(os.getenv("SYMPTOM_PRODUCTS_CANDIDATE_FETCH_LIMIT", "6")), 10),
+    )
     max_extra_component_lookups = 24
     max_excluded_reason_items = 4
     from services.user_service import UserService
@@ -577,14 +587,18 @@ async def symptom_products_api(request):
                         ingr, **products_kwargs
                     )
                 )
-                warning_task = asyncio.create_task(
-                    DrugService.get_fda_warnings_by_ingr(ingr)
-                )
-                products_res, us_warning_raw = await asyncio.gather(
-                    products_task,
-                    warning_task,
-                    return_exceptions=True,
-                )
+                if include_warning:
+                    warning_task = asyncio.create_task(
+                        DrugService.get_fda_warnings_by_ingr(ingr)
+                    )
+                    products_res, us_warning_raw = await asyncio.gather(
+                        products_task,
+                        warning_task,
+                        return_exceptions=True,
+                    )
+                else:
+                    products_res = await products_task
+                    us_warning_raw = None
                 if isinstance(products_res, Exception):
                     diagnostics["product_error"] = str(products_res)
                     products_res = {"products": [], "diagnostics": {"ingredient": ingr}}
@@ -781,12 +795,15 @@ async def symptom_products_api(request):
     items = await asyncio.gather(*[fetch_one(ingr) for ingr in ingredients])
     extra_component_task = asyncio.create_task(attach_other_component_dur_guidance(items))
 
-    raw_warning_map = {
-        item["ingredient"]: item.get("us_warning_raw")
-        for item in items
-        if item.get("ingredient") and item.get("us_warning_raw")
-    }
-    summarized_map = await AIService.bulk_summarize_fda_warnings(raw_warning_map)
+    summarized_map = {}
+    if include_warning:
+        raw_warning_map = {
+            item["ingredient"]: item.get("us_warning_raw")
+            for item in items
+            if item.get("ingredient") and item.get("us_warning_raw")
+        }
+        if raw_warning_map:
+            summarized_map = await AIService.bulk_summarize_fda_warnings(raw_warning_map)
     await extra_component_task
 
     for item in items:
